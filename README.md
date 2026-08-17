@@ -1,5 +1,7 @@
 # DSH Browser Control
 
+[**English**](./README.en.md) | 中文
+
 让 DeepSeek Harness（DSH）的 Agent 直接操控你**真实浏览器**的插件——类似 OpenClaw 的 Chrome 扩展。
 扩展安装在 Chrome/Edge 里，通过本机 WebSocket 与 DSH 通信，Agent 可以导航、点击、输入、
 截图、读页面，带着你的登录态完成真实任务。
