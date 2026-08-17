@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span id="status-dot" class="dot"></span>
+    <span id="status-text">未连接</span>
+    <span id="session-id" class="muted"></span>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <label for="ws-url">连接地址</label>
+      <input id="ws-url" type="text" spellcheck="false" placeholder="ws://127.0.0.1:3080/dsh/browser">
+    </div>
+    <div class="row">
+      <label for="token">配对令牌</label>
+      <input id="token" type="password" spellcheck="false" placeholder="粘贴 DSH 生成的配对码">
+    </div>
+    <div class="btns">
+      <button id="connect-btn" class="primary">连接</button>
+      <button id="disconnect-btn">断开</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <span>当前活动标签页</span>
+      <span id="cur-tab" class="muted ellipsis">—</span>
+    </div>
+  </section>
+
+  <section class="card" id="consent-card" style="display:none">
+    <h3>🔔 待授权请求</h3>
+    <p id="consent-text" class="muted"></p>
+    <div class="btns">
+      <button id="consent-allow" class="primary">允许</button>
+      <button id="consent-deny">拒绝</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>已授权域名</h3>
+    <ul id="consent-list"></ul>
+  </section>
+
+  <footer>
+    DSH Browser Control v<span id="version">—</span>
+    <span class="muted">协议 v1.0</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
