@@ -46,6 +46,26 @@
 - **修复**：总是拷贝合并（`merged.set(conn.buf)` + `merged.set(chunk)`），
   帧消费用 `subarray` 截断（O(1)）。
 
+### 7. 自绘 UI 应用读不到元素（QQ 邮箱案例，v1.9.1 修复）
+
+- **现象**：QQ 邮箱新版（wx.mail.qq.com）无法控制：元素树几乎为空（只有头像），
+  CDP 截图也挂起。
+- **排查方法（DOM 探针）**：`read_page` 返回 debug 统计——iframe 数 0、shadow DOM 0、
+  canvas 0，但 `totalElements: 2731`、`visibleElementCount: 1076`、body HTML 24 万字符
+  → **DOM 完全正常，是元素树选择器太窄**：QQ 邮箱自绘 UI 的交互元素是
+  `div/span` + JS 事件（无 `a/button/input/[role]` 语义标签），全部漏检。
+- **修复**：`buildTree` 候选条件扩展为
+  **语义标签 ∪ `cursor:pointer` ∪ tabindex/onclick**；并加噪音过滤
+  （无可读文本/无 aria-label 的非表单容器跳过）。
+- **配套**：
+  - 多 frame 聚合（iframe 应用如旧版邮箱/网盘）：content script 注入 allFrames +
+    `webNavigation.getAllFrames` 汇总（元素带 `frameId`），操作命令支持 `frameId`。
+  - `activeTab()` 弃用 `lastFocusedWindow`（用户开着 DevTools 窗口时指向无标签窗口
+    → 偶发"没有活动标签页"），改为优先聚焦的 normal 窗口。
+  - CDP 截图在个别特殊页面挂起且 SW 定时器不可靠（无法打断）→ 截图改
+    captureVisibleTab 优先 + CDP 兜底。
+  - keepalive Port 在页面进 bfcache 后断开 → onDisconnect 自动重连。
+
 ### 5. 元素定位失败 "el.scrollIntoView is not a function"（扩展侧）
 
 - **根因**：`lastTree` 保存的是元素树条目（普通 JSON 对象），不是 DOM 元素。
