@@ -3,7 +3,7 @@
   "name": "DSH Browser Control",
   "version": "1.8.0",
   "description": "DeepSeek Harness 浏览器控制桥：让 DSH Agent 操作你的浏览器（类似 OpenClaw 扩展）。协议契约见 docs/protocol.md v1.0。",
-  "permissions": ["tabs", "activeTab", "storage", "notifications", "scripting", "alarms", "debugger"],
+  "permissions": ["tabs", "activeTab", "storage", "notifications", "scripting", "alarms", "debugger", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

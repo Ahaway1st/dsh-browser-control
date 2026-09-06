@@ -1,5 +1,6 @@
 // DSH Browser Control — Host 插件（动态 Cordis 插件，Host 半）
 // 协议契约：docs/protocol.md v1.0（与 extension/ 扩展对应）
+// v1.9：多 frame 支持（click/type/press/scroll 增加 frameId，适配 QQ 邮箱等 iframe 应用）
 // v1.8：移除硬编码配对令牌（配置文件/随机生成 + browser_pairing_code 工具查询）
 // v1.7：跨 realm Uint8Array 修复（attachments/sharp instanceof）；v1.6：socket 读缓冲修复；
 // v1.5：帧缓冲 Uint8Array 化；v1.4：心跳文本消息；v1.3：clearTimeout 崩溃修复
@@ -429,40 +430,43 @@ return {
       ),
       makeTool(
         'browser_click',
-        '在浏览器当前页面点击元素。目标可用 browser_read_page 返回的元素 ref 索引，或 CSS 选择器。敏感站点操作需用户授权。',
+        '在浏览器当前页面点击元素。目标可用 browser_read_page 返回的元素 frameId+ref 定位（多 frame 页面如 QQ 邮箱必须带 frameId），或 CSS 选择器。敏感站点操作需用户授权。',
         {
-          ref: { type: 'integer', description: '元素树 ref 索引（来自 browser_read_page 的 elements[].ref）' },
-          selector: { type: 'string', description: 'CSS 选择器，ref 与 selector 二选一（ref 优先）' },
+          ref: { type: 'integer', description: '元素树 ref 索引（frame 内索引，来自 browser_read_page 的 elements[].ref）' },
+          frameId: { type: 'integer', description: '元素所在 frameId（来自 browser_read_page 的 elements[].frameId；默认 0 = 主 frame）' },
+          selector: { type: 'string', description: 'CSS 选择器（在主 frame 查找），ref 与 selector 二选一（ref 优先）' },
         },
         async (args) => {
           await requireConnected();
-          return sendCommand('click', { ref: args.ref, selector: args.selector }, consentFor(hostOfUrl(activeUrl)));
+          return sendCommand('click', { ref: args.ref, frameId: args.frameId, selector: args.selector }, consentFor(hostOfUrl(activeUrl)));
         },
       ),
       makeTool(
         'browser_type',
-        '在浏览器当前页面的输入框中输入文本。密码框的值不会被回传。敏感站点操作需用户授权。',
+        '在浏览器当前页面的输入框中输入文本。目标用 frameId+ref 定位（多 frame 页面必须带 frameId）。密码框的值不会被回传。敏感站点操作需用户授权。',
         {
-          ref: { type: 'integer', description: '元素树 ref 索引' },
-          selector: { type: 'string', description: 'CSS 选择器，ref 与 selector 二选一（ref 优先）' },
+          ref: { type: 'integer', description: '元素树 ref 索引（frame 内索引）' },
+          frameId: { type: 'integer', description: '元素所在 frameId（默认 0 = 主 frame）' },
+          selector: { type: 'string', description: 'CSS 选择器（在主 frame 查找），ref 与 selector 二选一（ref 优先）' },
           text: { type: 'string', required: true, description: '要输入的文本' },
           clear: { type: 'boolean', description: '是否先清空输入框（默认 false）' },
         },
         async (args) => {
           await requireConnected();
-          return sendCommand('type', { ref: args.ref, selector: args.selector, text: args.text, clear: !!args.clear }, consentFor(hostOfUrl(activeUrl)));
+          return sendCommand('type', { ref: args.ref, frameId: args.frameId, selector: args.selector, text: args.text, clear: !!args.clear }, consentFor(hostOfUrl(activeUrl)));
         },
       ),
       makeTool(
         'browser_press',
-        '在浏览器当前页面发送按键事件（Enter/Escape/Tab/ArrowUp 等，可带修饰键）。敏感站点操作需用户授权。',
+        '在浏览器当前页面发送按键事件（Enter/Escape/Tab/ArrowUp 等，可带修饰键）。frameId 指定按键发往的 frame（默认 0 = 主 frame；多 frame 页面按键应发往焦点所在 frame）。敏感站点操作需用户授权。',
         {
           key: { type: 'string', required: true, description: '按键名，如 Enter、Escape、Tab、ArrowDown' },
           modifiers: { type: 'array', items: { type: 'string', enum: ['Control', 'Alt', 'Shift', 'Meta'] }, description: '修饰键列表（可选）' },
+          frameId: { type: 'integer', description: '按键发往的 frameId（默认 0 = 主 frame）' },
         },
         async (args) => {
           await requireConnected();
-          return sendCommand('press', { key: args.key, modifiers: args.modifiers }, consentFor(hostOfUrl(activeUrl)));
+          return sendCommand('press', { key: args.key, modifiers: args.modifiers, frameId: args.frameId }, consentFor(hostOfUrl(activeUrl)));
         },
       ),
       makeTool(
@@ -471,10 +475,11 @@ return {
         {
           direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: '滚动方向' },
           delta: { type: 'number', description: '滚动像素量（up/down 时有效，默认 600）' },
+          frameId: { type: 'integer', description: '滚动目标 frameId（默认 0 = 主 frame；iframe 应用如 QQ 邮箱需指定）' },
         },
         async (args) => {
           await requireConnected();
-          return sendCommand('scroll', { direction: args.direction, delta: args.delta }, consentFor(hostOfUrl(activeUrl)));
+          return sendCommand('scroll', { direction: args.direction, delta: args.delta, frameId: args.frameId }, consentFor(hostOfUrl(activeUrl)));
         },
       ),
       makeTool(

@@ -7,8 +7,10 @@
   window.__dshContentLoaded = true;
 
   const REDACT_RE = /(sk-[A-Za-z0-9_-]{8,}|token[=:][^\s&"'<>]{6,}|password[=:][^\s&"'<>]{6,})/gi;
-  const MAX_ENTRIES = 200;
+  const MAX_ENTRIES = 400;
   const MAX_TEXT = 500;
+  // 语义标签 + 可聚焦；结合 cursor:pointer 启发覆盖 div/span 自绘 UI（如 QQ 邮箱新版）
+  const SELECTOR = 'a[href],button,input,select,textarea,[role],[tabindex],[onclick],h1,h2,h3,h4,h5,h6,nav,img,[contenteditable],summary,label,audio,video';
   let lastTree = [];
   let lastElements = []; // ref -> DOM 元素（与 lastTree 并行，供 click/type 定位）
 
@@ -20,16 +22,25 @@
     return true; // 异步响应
   });
 
-  // SW 保活（双层）：
-  // 1) 长连接 Port（Chrome 116+：活跃 Port 保持 SW 不终止，不受页面定时器节流影响）
-  try {
-    const keepalivePort = chrome.runtime.connect({ name: 'dsh-keepalive' });
-    keepalivePort.onDisconnect.addListener(() => {});
-  } catch (e) {}
-  // 2) 定期消息（前台页面时有效，作为补充）
-  setInterval(() => {
-    try { chrome.runtime.sendMessage({ type: 'dsh-keepalive' }); } catch (e) {}
-  }, 10000);
+  // SW 保活（双层，仅主 frame 建立——子 frame 无需重复保活）：
+  if (window.top === window.self) {
+    // 1) 长连接 Port（Chrome 116+：活跃 Port 保持 SW 不终止；页面进 bfcache 会断开 → 重连）
+    let keepalivePort = null;
+    const connectPort = () => {
+      try {
+        keepalivePort = chrome.runtime.connect({ name: 'dsh-keepalive' });
+        keepalivePort.onDisconnect.addListener(() => {
+          // bfcache/扩展更新导致断开：稍后重连（页面恢复可见/活跃时）
+          setTimeout(connectPort, 2000);
+        });
+      } catch (e) {}
+    };
+    connectPort();
+    // 2) 定期消息（前台页面时有效，作为补充）
+    setInterval(() => {
+      try { chrome.runtime.sendMessage({ type: 'dsh-keepalive' }); } catch (e) {}
+    }, 10000);
+  }
 
   function fail(code, message) {
     const e = new Error(message);
@@ -93,16 +104,40 @@
   }
 
   function buildTree() {
-    const SELECTOR = 'a[href],button,input,select,textarea,[role],h1,h2,h3,h4,h5,h6,nav,img,[contenteditable],summary,label';
+    // 覆盖自绘 UI（div/span + JS 事件，如 QQ 邮箱新版）：
+    // 匹配 = 语义/可聚焦标签 ∪ cursor:pointer 元素；
+    // 噪音过滤：无可读标识且非表单容器的纯装饰元素跳过
     const entries = [];
     const domEls = [];
     const seen = new WeakSet();
-    for (const el of document.querySelectorAll(SELECTOR)) {
+    const all = document.getElementsByTagName('*');
+    const total = all.length;
+    for (let i = 0; i < total; i++) {
       if (entries.length >= MAX_ENTRIES) break;
+      const el = all[i];
+      if (!(el instanceof Element)) continue;
       if (seen.has(el)) continue;
-      seen.add(el);
       if (!isVisible(el)) continue;
-      if (el.tagName === 'LABEL' && !cleanText(el.innerText) && !el.htmlFor) continue;
+      let isCandidate = false;
+      try {
+        if (el.matches(SELECTOR)) isCandidate = true;
+        if (!isCandidate && (el.hasAttribute('tabindex') || el.hasAttribute('onclick'))) isCandidate = true;
+        if (!isCandidate) {
+          const cursor = getComputedStyle(el).cursor;
+          if (cursor === 'pointer') isCandidate = true;
+        }
+      } catch (e) {}
+      if (!isCandidate) continue;
+      if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'META' || el.tagName === 'NOSCRIPT') continue;
+      // 噪音过滤：无文本/无 aria-label/title 的容器
+      const label = el.getAttribute('aria-label') || el.getAttribute('title');
+      const hasText = !!cleanText(el.innerText);
+      const isForm = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON' || el.tagName === 'A';
+      if (!hasText && !label && !isForm && el.tagName !== 'IMG' && el.tagName !== 'NAV' && !(el.hasAttribute('role') && el.getAttribute('role') !== 'presentation')) {
+        continue; // 纯装饰
+      }
+      if (el.tagName === 'LABEL' && !hasText && !el.htmlFor) continue;
+      seen.add(el);
       const e = entryFor(el);
       e.ref = entries.length;
       entries.push(e);
@@ -149,8 +184,32 @@
 
   async function run(op, args) {
     switch (op) {
-      case 'read_page':
-        return { url: location.href, title: document.title, elements: buildTree() };
+      case 'read_page': {
+        // debug：DOM 结构诊断（排查 iframe/shadow DOM/非 DOM 渲染）
+        const iframes = Array.from(document.querySelectorAll('iframe'));
+        const mainDiv = document.body ? document.body.firstElementChild : null;
+        let visibleCount = 0;
+        const allEls = document.getElementsByTagName('*');
+        for (let i = 0; i < allEls.length && i < 20000; i++) {
+          try { if (isVisible(allEls[i])) visibleCount++; } catch (e) {}
+        }
+        const debug = {
+          iframeCount: iframes.length,
+          bodyHtmlLen: document.body ? document.body.innerHTML.length : 0,
+          mainDivTag: mainDiv ? mainDiv.tagName : null,
+          mainDivHtmlLen: mainDiv ? mainDiv.innerHTML.length : 0,
+          mainDivChildCount: mainDiv ? mainDiv.children.length : 0,
+          totalElements: allEls.length,
+          visibleElementCount: visibleCount,
+          docW: document.documentElement.scrollWidth,
+          docH: document.documentElement.scrollHeight,
+          viewW: window.innerWidth,
+          viewH: window.innerHeight,
+          canvases: Array.from(document.querySelectorAll('canvas')).length,
+          bodyChildren: Array.from(document.body ? document.body.children : []).slice(0, 10).map((el) => el.tagName + ':' + el.innerHTML.length),
+        };
+        return { url: location.href, title: document.title, elements: buildTree(), debug };
+      }
 
       case 'click': {
         const el = findTarget(args);

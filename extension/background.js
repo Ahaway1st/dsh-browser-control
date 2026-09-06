@@ -259,7 +259,7 @@ async function execute(cmd) {
     case 'list_tabs': return execListTabs();
     case 'switch_tab': return execSwitchTab(args);
     case 'screenshot': return execScreenshot();
-    case 'read_page': return execPageOp('read_page', {});
+    case 'read_page': return execReadPage();
     case 'click': return execPageOp('click', args);
     case 'type': return execPageOp('type', args);
     case 'press': return execPageOp('press', args);
@@ -270,7 +270,21 @@ async function execute(cmd) {
 }
 
 async function activeTab() {
-  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  // 优先：聚焦的 normal 窗口中的活动标签（避免 lastFocusedWindow 指向 DevTools/无标签窗口）
+  try {
+    const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
+    for (const w of wins) {
+      if (w.focused) {
+        const tabs = await chrome.tabs.query({ active: true, windowId: w.id });
+        if (tabs && tabs[0]) return tabs[0];
+      }
+    }
+    for (const w of wins) {
+      const tabs = await chrome.tabs.query({ active: true, windowId: w.id });
+      if (tabs && tabs[0]) return tabs[0];
+    }
+  } catch (e) {}
+  const tabs = await chrome.tabs.query({ active: true });
   return tabs && tabs[0] ? tabs[0] : null;
 }
 
@@ -331,13 +345,19 @@ async function execScreenshot() {
   const tab = await activeTab();
   if (!tab || tab.id === undefined) throw { code: 'ENOTFOUND', message: '没有活动标签页' };
   console.log('[dsh] screenshot: tab', tab.id, tab.url);
-  // 主路径：CDP Page.captureScreenshot（debugger 权限）
-  // 协议级渲染截图，不依赖窗口可见/聚焦/activeTab 授予；
-  // 不用 SW 定时器做超时（Chrome 对无 UI 扩展的定时器不可靠），挂起由 DSH 侧 60s 兜底
+  // 主路径：captureVisibleTab（tabs 权限；需窗口可见——先聚焦）
+  try {
+    try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (e) {}
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    console.log('[dsh] screenshot: visible captured', base64.length, 'chars');
+    return { data: base64, width: 0, height: 0, mime: 'image/png' };
+  } catch (e) {
+    console.log('[dsh] screenshot: visible failed, try CDP:', e.message);
+  }
+  // 备选：CDP Page.captureScreenshot（后台窗口可用；个别页面会挂起，由 DSH 60s 兜底）
   const base64 = await captureViaDebugger(tab.id);
-  console.log('[dsh] screenshot: captured', base64.length, 'chars');
-  // 尺寸由 DSH 侧 attachments 服务解析；这里直通 base64，
-  // 避免 SW 内做解码/降采样长任务（fetch/createImageBitmap/canvas）触发 Chrome 回收 SW
+  console.log('[dsh] screenshot: CDP captured', base64.length, 'chars');
   return { data: base64, width: 0, height: 0, mime: 'image/png' };
 }
 
@@ -411,21 +431,64 @@ async function blobToBase64(blob) {
 async function execPageOp(op, args) {
   const tab = await activeTab();
   if (!tab || tab.id === undefined) throw { code: 'ENOTFOUND', message: '没有活动标签页' };
-  const res = await pageOp(tab.id, op, args);
+  // 多 frame 支持：操作路由到指定 frameId（默认 0 = 主 frame）
+  const frameId = args.frameId != null ? Number(args.frameId) : 0;
+  const res = await frameOp(tab.id, frameId, op, args);
   if (!res.ok) throw res.error || { code: 'EUNKNOWN', message: '操作失败' };
   const data = res.data || {};
   if (data && typeof data === 'object' && data.tabId === null) data.tabId = tab.id;
   return data;
 }
 
-async function pageOp(tabId, op, args) {
+// 对指定 frame 执行操作；content script 未注入时注入所有 frame 后重试
+async function frameOp(tabId, frameId, op, args) {
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'dsh-op', op, args });
+    return await chrome.tabs.sendMessage(tabId, { type: 'dsh-op', op, args }, { frameId });
   } catch (e) {
-    // content script 未注入（扩展安装前打开的页面）→ 注入后重试一次
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tabId, { type: 'dsh-op', op, args });
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+    return await chrome.tabs.sendMessage(tabId, { type: 'dsh-op', op, args }, { frameId });
   }
+}
+
+// 列出标签页的所有 frame（webNavigation 权限）
+async function tabFrames(tabId) {
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    return (frames || [])
+      .filter((f) => f.frameId >= 0)
+      .map((f) => ({ frameId: f.frameId, url: f.url || '' }));
+  } catch (e) {
+    return [{ frameId: 0, url: '' }];
+  }
+}
+
+// read_page：聚合所有 frame 的可交互元素树（多 frame 应用如 QQ 邮箱的 UI 在 iframe 中）
+async function execReadPage() {
+  const tab = await activeTab();
+  if (!tab || tab.id === undefined) throw { code: 'ENOTFOUND', message: '没有活动标签页' };
+  const frames = await tabFrames(tab.id);
+  const perFrame = [];
+  for (const f of frames) {
+    try {
+      const res = await frameOp(tab.id, f.frameId, 'read_page', {});
+      if (res && res.ok && res.data && Array.isArray(res.data.elements)) {
+        perFrame.push({ frameId: f.frameId, url: f.url || '', elements: res.data.elements, debug: res.data.debug || null });
+      }
+    } catch (e) {
+      // 该 frame 不可注入（chrome:// 等）→ 跳过
+    }
+  }
+  // 展平：元素带 frameId/frameUrl；ref 为 frame 内索引
+  const elements = [];
+  for (const r of perFrame) {
+    for (const el of r.elements) {
+      el.frameId = r.frameId;
+      el.frameUrl = r.url;
+      elements.push(el);
+    }
+  }
+  const frameDebug = perFrame.filter((r) => r.debug).map((r) => ({ frameId: r.frameId, debug: r.debug }));
+  return { url: tab.url || '', title: tab.title || '', frameCount: perFrame.length, elements, frameDebug };
 }
 
 async function execRunJs({ expression }) {
