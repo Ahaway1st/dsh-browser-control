@@ -30,6 +30,8 @@ DSH 动态 Cordis 插件的源码存档：`plugin.js`（Host 半）+ `client.js`
   `consentRequired`，扩展侧确认后放行；授权按域名记住
 - 截图附件：扩展回传 base64 → 解码（宿主 realm Uint8Array，见 DEVELOPMENT.md
   跨 realm 陷阱）→ `attachments.saveImages` 保存
+- 多 frame：`browser_click/type/press/scroll` 透传 `frameId` 参数（默认 0 = 主 frame；
+  配合扩展侧 read_page 聚合，支持 iframe 应用与 QQ 邮箱类自绘 UI 页面）
 
 ## 运行环境约束（node:vm 沙箱）
 

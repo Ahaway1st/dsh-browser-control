@@ -202,11 +202,14 @@
 ## 附录 A：元素树条目
 
 ```
-{ type, text, role, ref, value?, placeholder?, href?, x, y, w, h, disabled? }
+{ type, text, role, ref, value?, placeholder?, href?, x, y, w, h, disabled?, frameId?, frameUrl? }
 ```
 
 - `type`: button | link | input | textbox | checkbox | select | nav | heading | text | img | other
-- `ref`: 0 起整数索引（单次 read_page 结果内稳定；页面变化后失效，需重读）
+- `ref`: 0 起整数索引，**frame 内**索引（单次 read_page 结果内稳定；页面变化后失效，需重读）
+- `frameId` / `frameUrl`（v1.1 增量）：多 frame 页面的 read_page 会**聚合所有 frame**，
+  元素带其所属 frameId（0 = 主 frame）与 frameUrl；点击/输入/按键/滚动需在目标参数中
+  传相同的 `frameId`（默认 0 = 主 frame）。单 frame 页面不出现此字段差异。
 - `x/y/w/h`: 相对视口 CSS 像素
 - `text` 截断：> 500 字符截断加 "…"；敏感串替换 `<redacted>`
 

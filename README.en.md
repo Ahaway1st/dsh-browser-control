@@ -12,7 +12,7 @@ state and cookies** to complete real tasks.
 │  DSH Browser Control ext (MV3)    │       │  browser-control plugin (dynamic Cordis)     │
 │  ├─ content script: page ops      │  WebSocket  │  ├─ WebSocket bridge (/dsh/browser)    │
 │  │   (click/type/read DOM/scroll) │◄───────►│  ├─ pairing token (config file/random)    │
-│  ├─ background: tabs/CDP screenshot│ JSON cmd  │  ├─ browser_* dynamic tools (for agents)│
+│  ├─ background: tabs/screenshot/all-frames │ JSON cmd │  ├─ browser_* dynamic tools (for agents)│
 │  └─ popup: pairing/consent mgmt   │  /events │  ├─ sensitive-site consent gate          │
 └───────────────────────────────────┘       │  └─ screenshots saved as session attachments│
                                              └──────────────────────┬─────────────────────┘
@@ -28,7 +28,7 @@ state and cookies** to complete real tasks.
   scroll, switch tabs
 - **Text-based page perception** — interactive element tree (buttons/links/inputs/headings + ref
   indexes), no vision model required
-- **CDP screenshot** — works even for background windows, auto-saved as a DSH session attachment
+- **Screenshot** — captureVisibleTab first with CDP fallback, auto-saved as a DSH session attachment
 - **Sensitive-site consent gate** — operations on bank/payment/government domains require your
   confirmation in the browser (system notification + popup dual channel); consent is remembered
   per-domain and can be cleared anytime
@@ -83,15 +83,18 @@ In a DSH session:
 | Tool | Description |
 |---|---|
 | `browser_navigate` | Navigate to a URL (consent gate on sensitive sites) |
-| `browser_read_page` | Read the interactive element tree (ref indexes for targeting) |
-| `browser_click` | Click an element (ref or CSS selector) |
-| `browser_type` | Type text (optional clear; password values never echoed back) |
-| `browser_press` | Press keys (Enter/Escape/Tab/arrows + modifiers) |
-| `browser_scroll` | Scroll the page |
+| `browser_read_page` | Read the interactive element tree; on multi-frame pages aggregates every frame (elements carry `frameId` + frame-local `ref`) |
+| `browser_click` | Click an element (`frameId`+`ref`, or CSS selector) |
+| `browser_type` | Type text (`frameId`+`ref` targeting; optional clear; password values never echoed back) |
+| `browser_press` | Press keys (optional `frameId`; Enter/Escape/Tab/arrows + modifiers) |
+| `browser_scroll` | Scroll the page (optional `frameId`) |
 | `browser_list_tabs` / `browser_switch_tab` | Tab management |
-| `browser_screenshot` | CDP screenshot, saved as a session attachment |
+| `browser_screenshot` | Screenshot (captureVisibleTab + CDP fallback), saved as a session attachment |
 | `browser_run_js` | Execute arbitrary JS (**denied by default policy**, EPOLICY) |
 | `browser_pairing_code` | Query the pairing token & connection status |
+
+> On plain single-frame pages you never need to care about `frameId` (default 0 = main frame);
+> on iframe apps (e.g. QQ Mail) use the `frameId` reported by `read_page`.
 
 ## ❓ FAQ
 
@@ -100,8 +103,9 @@ Dynamic plugins are process-local. After a DSH restart, re-run Step 2 (reinstall
 (Roadmap: host-composition integration so DSH loads it automatically.)
 
 **A "debugging this browser" banner appears during screenshots?**
-Normal. Screenshots use the CDP protocol (debugger permission) so they work for background
-windows; the banner appears only while capturing.
+Only when the CDP fallback path is used (when the window is not visible for captureVisibleTab);
+the banner is brief. The main captureVisibleTab path has no banner but requires the browser
+window to be visible.
 
 **Can't read/operate on `chrome://` internal pages?**
 Normal. Content scripts cannot be injected into internal pages; navigate to a normal web page
@@ -124,14 +128,17 @@ dsh-browser-control/
 ├── docs/              protocol, requirements, development notes (pitfalls)
 ├── extension/         Chrome/Edge MV3 extension (zero build, load unpacked)
 │   ├── manifest.json
-│   ├── background.js  SW: connection/command routing/CDP screenshot/consent/keepalive
+│   ├── background.js  SW: connection/command routing/screenshot/all-frame aggregation/consent/keepalive
 │   ├── content.js     page ops: element tree/click/type/keys/scroll
 │   └── popup.*        pairing, connection status, consent management
 ├── plugin/            DSH dynamic Cordis plugin (Host half + Client half)
 │   ├── plugin.js      WebSocket bridge, browser_* tools, consent gate, attachments
 │   ├── client.js      GUI overlay panel (shell.overlay)
 │   └── test/          verification scripts (SHA1/base64, frame parsing, heartbeat probe, sim…)
-└── README.md
+├── scripts/          install.ps1 (integrity check + step-by-step guide)
+├── README.md         Chinese (this project's primary doc)
+├── README.en.md      English (this file)
+└── LICENSE           MIT
 ```
 
 ## 🔒 Security Model

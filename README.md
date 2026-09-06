@@ -11,7 +11,7 @@
 │  DSH Browser Control 扩展 (MV3)  │        │  browser-control 插件（动态 Cordis，Host 半）   │
 │  ├─ content script: 页面感知/操作 │ WebSocket│  ├─ WebSocket 桥（/dsh/browser）             │
 │  │   （点击/输入/读DOM/滚动）      │◄───────►│  ├─ 配对令牌（配置文件/随机生成）             │
-│  ├─ background: 标签页/CDP截图    │ JSON 命令│  ├─ browser_* 动态工具（Agent 可调用）       │
+│  ├─ background: 标签页/截图/多frame │ JSON 命令│  ├─ browser_* 动态工具（Agent 可调用）       │
 │  └─ popup: 配对/连接/授权管理     │  /事件  │  ├─ 敏感站点授权门                          │
 └───────────────────────────────┘        │  └─ 截图存为 DSH 会话附件                      │
                                          └──────────────────────┬─────────────────────┘
@@ -24,8 +24,9 @@
 ## ✨ 特性
 
 - **操作真实浏览器**：带着你的登录态/cookie，执行导航、点击、输入、按键、滚动、切换标签页
-- **文本化页面感知**：可交互元素树（按钮/链接/输入框/标题 + ref 索引），不依赖视觉模型
-- **CDP 协议截图**：后台窗口也能截，自动保存为 DSH 会话附件（GUI 可直接查看）
+- **文本化页面感知**：可交互元素树（ref 索引定位），不依赖视觉模型；支持**自绘 UI**
+  （QQ 邮箱等 div+JS 无语义标签界面，cursor:pointer 启发）与 **iframe 应用**（多 frame 聚合）
+- **自动截图存档**：captureVisibleTab 优先 + CDP 兜底，保存为 DSH 会话附件（GUI 可直接查看）
 - **敏感站点授权门**：银行/支付/政务类域名操作需你在浏览器侧确认（系统通知 + popup 双通道），
   授权按域名记忆、可随时清除
 - **GUI 常驻面板**：DSH 界面右下角显示配对码与连接状态（shell.overlay）
@@ -79,15 +80,18 @@ DSH 的 Agent 会自动完成定义与运行。**运行后会在会话流里出�
 | 工具 | 说明 |
 |---|---|
 | `browser_navigate` | 导航到指定 URL（敏感站点触发授权门） |
-| `browser_read_page` | 读取可交互元素树（ref 索引供定位） |
-| `browser_click` | 点击元素（ref 或 CSS 选择器） |
-| `browser_type` | 输入文本（clear 可选，密码框不回传） |
-| `browser_press` | 按键（Enter/Escape/Tab/方向键 + 修饰键） |
-| `browser_scroll` | 滚动页面 |
+| `browser_read_page` | 读取可交互元素树；多 frame 页面聚合各 frame（元素带 `frameId` + frame 内 `ref`） |
+| `browser_click` | 点击元素（`frameId`+`ref` 或 CSS 选择器） |
+| `browser_type` | 输入文本（`frameId`+`ref` 定位，clear 可选，密码框不回传） |
+| `browser_press` | 按键（可指定 `frameId`，Enter/Escape/Tab/方向键 + 修饰键） |
+| `browser_scroll` | 滚动页面（可指定 `frameId`） |
 | `browser_list_tabs` / `browser_switch_tab` | 标签页管理 |
-| `browser_screenshot` | CDP 截图并保存为会话附件 |
+| `browser_screenshot` | 截图（captureVisibleTab + CDP 兜底）并保存为会话附件 |
 | `browser_run_js` | 执行任意 JS（**默认策略拒绝**，EPOLICY） |
 | `browser_pairing_code` | 查询配对令牌与连接状态 |
+
+> 单 frame 普通网页无需关心 `frameId`（默认 0 = 主 frame）；多 frame / iframe 应用
+> （如 QQ 邮箱类）以 `read_page` 返回的 `frameId` 为准。
 
 ## ❓ 常见问题
 
@@ -96,7 +100,8 @@ DSH 的 Agent 会自动完成定义与运行。**运行后会在会话流里出�
 （Roadmap：宿主化改造，让 DSH 启动自动加载。）
 
 **截图时浏览器顶部出现"正在调试此浏览器"？**
-正常。截图走 CDP 协议（debugger 权限），不依赖窗口状态；横幅只在截图瞬间出现。
+仅在 CDP 兜底路径生效时出现（captureVisibleTab 不可用的场景），横幅短暂；
+主路径 captureVisibleTab 无横幅但要求浏览器窗口可见。
 
 **在 `chrome://` 等内部页面无法读取/操作？**
 正常。content script 无法注入内部页；导航到普通网页后恢复。
@@ -117,14 +122,17 @@ dsh-browser-control/
 ├── docs/              协议、需求、开发笔记（踩坑记录）
 ├── extension/         Chrome/Edge MV3 扩展（零构建，unpacked 加载）
 │   ├── manifest.json
-│   ├── background.js  SW：连接/命令路由/CDP截图/授权门/保活
-│   ├── content.js     页面操作层：元素树/点击/输入/按键/滚动
+│   ├── background.js  SW：连接/命令路由/截图/多frame聚合/授权门/保活
+│   ├── content.js     页面操作层：元素树（含自绘 UI）/点击/输入/按键/滚动
 │   └── popup.*        配对、连接状态、授权管理 UI
 ├── plugin/            DSH 动态 Cordis 插件（Host 半 + Client 半）
 │   ├── plugin.js      WebSocket 桥、browser_* 工具、授权门、附件
 │   ├── client.js      GUI 常驻面板（shell.overlay）
 │   └── test/          验证脚本（SHA1/base64、帧解析、心跳探针、模拟扩展…）
-└── README.md
+├── scripts/           install.ps1 安装检查与指引
+├── README.md          本文件（中文）
+├── README.en.md       英文版
+└── LICENSE            MIT
 ```
 
 ## 🔒 安全模型

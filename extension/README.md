@@ -8,20 +8,21 @@ MV3 零构建扩展：DSH（DeepSeek Harness）Agent 操作你真实浏览器的
 | 文件 | 职责 |
 |---|---|
 | `manifest.json` | MV3 清单与权限（见下） |
-| `background.js` | Service Worker：WebSocket 连接/握手/文本心跳、命令路由、CDP 截图、授权门、SW 保活 |
-| `content.js` | 页面操作层：元素树提取、点击/输入/按键/滚动、SW 保活 Port（按需注入、幂等） |
+| `background.js` | Service Worker：WebSocket 连接/握手/文本心跳、命令路由、截图（captureVisibleTab 主路径 + CDP 兜底）、多 frame 聚合（webNavigation）、授权门、SW 保活 |
+| `content.js` | 页面操作层：元素树提取（语义标签 + cursor:pointer 启发，覆盖自绘 UI）、点击/输入/按键/滚动、SW 保活 Port（注入所有 frame、幂等） |
 | `popup.html/js/css` | 配对（令牌/地址）、连接状态、待授权确认、已授权域名管理 |
 | `icons/` | 扩展图标（脚本生成） |
 
 ## 权限说明（manifest）
 
-- `tabs`：读取标签页信息、`captureVisibleTab` 兜底截图
-- `activeTab`：用户点击扩展图标后临时授予（`captureTab` 截图路径）
-- `scripting` + `host_permissions <all_urls>`：按需注入 content script（页面操作必需）
+- `tabs`：读取标签页信息、`captureVisibleTab`（**截图主路径**，需浏览器窗口可见）
+- `webNavigation`：枚举标签页内所有 frame（多 frame/iframe 应用聚合必需）
+- `scripting` + `host_permissions <all_urls>`：按需注入 content script（所有 frame，页面操作必需）
 - `notifications`：敏感站点授权门通知
-- `debugger`：CDP `Page.captureScreenshot`（**主截图路径**，后台窗口也可用；截图时浏览器顶部短暂显示"正在调试此浏览器"）
+- `debugger`：CDP `Page.captureScreenshot`（**截图兜底路径**，主路径不可用/窗口不可见时；截图时浏览器顶部短暂显示"正在调试此浏览器"）
 - `storage`：令牌/连接配置/授权记录（`chrome.storage.local`）
 - `alarms`：断线重连兜底唤醒
+- `activeTab`：当前截图路径不使用（历史截图方案预留）
 
 ## 安装
 
